@@ -1,78 +1,54 @@
-import tensorflow as tf
-from tensorflow.keras import layers, models
-from tensorflow.keras.applications import VGG16
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from tensorflow import keras
+from keras import layers, models
+import os
+import cv2
+import numpy as np
 
-# Define image size and batch size
-IMG_SIZE = 224
-BATCH_SIZE = 32
+fist_folder = "/Users/adamelsayed/Downloads/archive/train/train/11"
+palm_folder = "/Users/adamelsayed/Downloads/archive/train/train/5"
 
-# 1. Load the VGG16 model, excluding the top layer
-base_model = VGG16(weights='imagenet', include_top=False, input_shape=(IMG_SIZE, IMG_SIZE, 3))
-base_model.trainable = False
+def load_preprocessed_images(folder, label):
+    images = []
+    labels = []
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        if filename.endswith(('.jpg')):
+            img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)  # Grayscale
+            img = cv2.resize(img, (128, 128))  # Resize to 128x128
+            img = img / 255.0  # Normalize
+            images.append(img)
+            labels.append(label)
+    return images, labels
 
-# 2. Add custom layers
+fist_images, fist_labels = load_preprocessed_images(fist_folder, 0)  # Label fists as 0
+palm_images, palm_labels = load_preprocessed_images(palm_folder, 1)  # Label palms as 1
+
+images = np.array(fist_images + palm_images)
+images = np.expand_dims(images, axis=-1)  # Add channel dimension
+labels = np.array(fist_labels + palm_labels)
+
+# Split into training and testing
+X_train, X_test, y_train, y_test = train_test_split(images, labels, test_size=0.2, random_state=42)
+
+# Define the CNN model
 model = models.Sequential([
-    base_model,
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 1)),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(128, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
     layers.Flatten(),
     layers.Dense(128, activation='relu'),
-    layers.Dropout(0.5),
-    layers.Dense(1, activation='sigmoid')  # Binary classification
+    layers.Dense(2, activation='softmax')  # Two classes: fist, palm
 ])
 
-# 3. Compile the model
-model.compile(optimizer=Adam(learning_rate=0.001),
-              loss='binary_crossentropy',
-              metrics=['accuracy'])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
-# 4. Set up ImageDataGenerator
-train_datagen = ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    validation_split=0.2
-)
+# Train the model
+model.fit(X_train, y_train, epochs=10, validation_data=(X_test, y_test))
 
-# 5. Load training and validation data
-train_generator = train_datagen.flow_from_directory(
-    'dataset/',
-    target_size=(IMG_SIZE, IMG_SIZE),
-    batch_size=BATCH_SIZE,
-    class_mode='binary',
-    subset='training'
-)
-
-validation_generator = train_datagen.flow_from_directory(
-    'dataset/',
-    target_size=(IMG_SIZE, IMG_SIZE),
-    batch_size=BATCH_SIZE,
-    class_mode='binary',
-    subset='validation'
-)
-
-# 6. Train the model
-history = model.fit(
-    train_generator,
-    epochs=10,
-    validation_data=validation_generator
-)
-
-# 7. Fine-tuning the model
-base_model.trainable = True
-model.compile(optimizer=Adam(learning_rate=1e-5),
-              loss='binary_crossentropy',
-              metrics=['accuracy'])
-
-history_fine = model.fit(
-    train_generator,
-    epochs=10,
-    validation_data=validation_generator
-)
-
-# 8. Save the trained model
-model.save('hand_gesture_model.h5')
+# Save the model
+model.save('hand_model.h5')
+print("Model saved as 'hand_model.h5'")
